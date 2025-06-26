@@ -1,0 +1,131 @@
+---
+title: "clone1_1_vs_clone1(wt)RNAseq"
+format: pdf
+editor: visual
+---
+
+#Perform DESeq on clone1_1 (E1E2) vs clone1(wt) treated
+
+```{r}
+library(DESeq2)
+library(ggplot2)
+library(tidyverse)
+library(tximport)
+library(readr)
+```
+
+```{r}
+metadata_2 <-read.csv("E1E2_metadata_B12vsclone1.csv")
+metadata_2 <- as.data.frame(metadata_2)
+View(metadata_2)
+```
+
+```{r}
+count_filtered <- read.csv("gene_counts_filtered10.csv", row.names =1)
+count_filtered <- as.data.frame(count_filtered)
+View(count_filtered)
+
+```
+
+```{r}
+dim(count_filtered)
+```
+
+```{r}
+dds_wtvsclone1_1 <-  DESeqDataSetFromMatrix(countData=count_filtered[,c(10:15)], 
+                              colData=metadata_2[c(10:15),], 
+                              design=~treatment)
+dds_wtvsclone1_1
+```
+
+```{r}
+dds_wtvsclone1_1 <- DESeq(dds_wtvsclone1_1)
+
+```
+
+```{r}
+results_wtvsclone1_1 <- results(dds_wtvsclone1_1)
+head(results_wtvsclone1_1 )
+summary(results_wtvsclone1_1)
+
+```
+
+```{r}
+# Save results to CSV
+#write.csv(as.data.frame(results_wtvsclone1_1), file = "dds_clone1_1treated_vs_wt.csv")
+
+```
+
+```{r}
+
+volcano_wtvsclone1_1<- as.data.frame(results_wtvsclone1_1)
+# Add row names as the first column named "Genes"
+volcano_wtvsclone1_1$Genes <- rownames(volcano_wtvsclone1_1)
+
+# Reorder the columns so that "Genes" is the first column
+volcano_wtvsclone1_1 <- volcano_wtvsclone1_1[, c("Genes", setdiff(names(volcano_wtvsclone1_1), "Genes"))]
+
+# Check the result
+head(volcano_wtvsclone1_1)
+
+```
+
+```{r}
+# Add a new column to categorize upregulated, downregulated, and non-significant genes
+volcano_wtvsclone1_1$expression <- ifelse(volcano_wtvsclone1_1$padj < 0.05 & volcano_wtvsclone1_1$log2FoldChange > 0, "Upregulated",
+                                 ifelse(volcano_wtvsclone1_1$padj < 0.05 & volcano_wtvsclone1_1$log2FoldChange < 0, "Downregulated", 
+                                        "Not Significant"))
+
+# Create the volcano plot
+ggplot(volcano_wtvsclone1_1, aes(x = log2FoldChange, y = -log10(padj), color = expression)) +
+    geom_point() +
+    theme_minimal() +
+    scale_color_manual(values = c("Upregulated" = "red", "Downregulated" = "blue", "Not Significant" = "gray")) +
+    labs(title = "CTRL_1 (H:F) vs CTRL Volcano Plot", 
+         x = "Log2 Fold Change", 
+         y = "-Log10 (adjusted p-value)", 
+         color = "Expression")+
+  ylim(0,400)
+
+
+```
+
+```{r}
+# Load the necessary libraries
+library(ggplot2)
+library(ggrepel)
+library(dplyr)
+
+# Set significance thresholds
+significance_threshold <- 0.05
+fold_change_threshold <- 0  # Log2 fold change cutoff (adjust as needed)
+
+# Add a new column to categorize upregulated, downregulated, and non-significant genes
+volcano_wtvsclone1_1$expression <- ifelse(volcano_wtvsclone1_1$padj < significance_threshold & volcano_wtvsclone1_1$log2FoldChange > fold_change_threshold, "Upregulated",
+                                 ifelse(volcano_wtvsclone1_1$padj < significance_threshold & volcano_wtvsclone1_1$log2FoldChange < -fold_change_threshold, "Downregulated", 
+                                        "Not Significant"))
+
+# Select the top 10 genes based on absolute fold change and adjusted p-value
+top_genes <- volcano_wtvsclone1_1 %>%
+  filter(padj < significance_threshold) %>%  # Keep only significant genes
+  arrange(desc(abs(log2FoldChange)), padj) %>%  # Sort by highest fold change, then lowest adjusted p-value
+  slice_head(n = 8)  # Select top 10 genes (adjust as needed)
+
+# Create the volcano plot
+ggplot(volcano_wtvsclone1_1, aes(x = log2FoldChange, y = -log10(padj), color = expression)) +
+  geom_point(alpha = 0.7, size = 2) +  # Plot all points
+  scale_color_manual(values = c("Upregulated" = "red", "Downregulated" = "blue", "Not Significant" = "gray")) +  # Define colors
+  labs(title = "CTRL_1 (H:F) vs CTRL Volcano Plot", 
+       x = "Log2 Fold Change", 
+       y = "-Log10 (adjusted p-value)", 
+       color = "Expression") +
+  theme_minimal() +
+  ylim(0, 400) +  # Set y-axis limits
+  geom_hline(yintercept = -log10(significance_threshold), linetype = "dashed", color = "black") +  # P-value cutoff
+  geom_vline(xintercept = fold_change_threshold, linetype = "dashed", color = "black") +  # Log2 fold change cutoff
+  geom_vline(xintercept = -fold_change_threshold, linetype = "dashed", color = "black") +  # Log2 fold change cutoff
+  geom_text_repel(data = top_genes, aes(label = Genes), color = "black", size = 3, max.overlaps = 10)  # Label top genes
+
+# Optionally save the plot
+# ggsave("volcano_plot_wt1_vs_wt.png", width = 8, height = 6)
+```
