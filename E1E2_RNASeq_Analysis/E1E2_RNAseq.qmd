@@ -1,0 +1,722 @@
+---
+title: "E1E2_RNAseq_B12vsB12treated"
+format: pdf
+editor: visual
+---
+
+```{r}
+library(DESeq2)
+library(ggplot2)
+library(tidyverse)
+library(tximport)
+library(readr)
+```
+
+```{r}
+
+# List of Kallisto abundance files
+files <- list.files(path = "./E1E2Furin_RNAseq_kallisto_output", pattern = "abundance.tsv", full.names = TRUE)
+
+# Load the gene-to-transcript mapping
+tx2gene <- read.csv("Tx_to_gene_CHO.csv")
+View(tx2gene)
+
+# Import Kallisto results and summarize to gene-level counts
+txi <- tximport(files, type = "kallisto", tx2gene = tx2gene)
+
+# Gene-level counts
+gene_counts <- txi$counts
+
+# Extract sample names, removing the '_abundance.tsv' part (e.g., "sample1_abundance.tsv" -> "sample1")
+sample_names <- gsub("_abundance.tsv$", "", basename(files))
+
+# Assign sample names to the columns of gene_counts
+colnames(gene_counts) <- sample_names
+
+# View the updated gene-level counts matrix
+View(gene_counts)
+
+# Write the TPM matrix to a CSV file
+#write.csv(gene_counts, file = "gene_counts.csv", row.names = TRUE)
+
+```
+
+#Get TPM values and write csv file
+
+```{r}
+TPM <- txi$abundance
+
+# Assign sample names to the columns of gene_counts
+colnames(TPM) <- sample_names
+View(TPM)
+# Write the TPM matrix to a CSV file
+#write.csv(TPM, file = "TPM_matrix.csv", row.names = TRUE)
+
+```
+
+#check whether the sE1E2 is in the samples
+
+Check the variance with PCA of the filtered data
+
+```{r}
+gene_counts <- as.data.frame(gene_counts)
+head(gene_counts)
+```
+
+```{r}
+colnames(gene_counts)
+```
+
+```{r}
+## Again we have to take the transpose of our data 
+pca <- prcomp(t(gene_counts))
+ 
+## Simple unpolished plot of pc1 and pc2
+plot(pca$x[,1], pca$x[,2], xlab="PC1", ylab="PC2")
+```
+
+```{r}
+summary(pca)
+```
+
+A barplot of the proportion of Variance for each PC. We see that most of the variance lies within the first four PC.
+
+```{r}
+plot(pca, main="Quick scree plot")
+```
+
+Let’s make the above scree plot ourselves and in so doing explore the object returned from prcomp() a little further. We can use the square of pca\$sdev, which stands for “standard deviation”, to calculate how much variation in the original data each PC accounts for:
+
+```{r}
+## Variance captured per PC 
+pca.var <- pca$sdev^2
+
+## Percent variance is often more informative to look at 
+pca.var.per <- round(pca.var/sum(pca.var)*100, 1)
+pca.var.per
+```
+
+Use this to generate our own scree-plot.
+
+```{r}
+library(factoextra)
+fviz_eig(pca, addlabels = TRUE)
+```
+
+```{r}
+barplot(pca.var.per, main="Scree Plot", 
+        names.arg = paste0("PC", 1:18),
+        xlab="Principal Component", ylab="Percent Variation")
+```
+
+Use ggplot to plot the PCA variance.
+
+```{r}
+
+df <- as.data.frame(pca$x)
+
+# Add titles to the PCA plot
+pcaplot <- ggplot(df) + 
+  aes(PC1, PC2, label = colnames(gene_counts), col = colnames(gene_counts)) + 
+  geom_point() + 
+  geom_text(nudge_x = 0.1, check_overlap = TRUE) +
+  labs(
+    title = "PCA plot of raw gene counts for all samples",  # Add the plot title
+    x = paste0("PC1 (", pca.var.per[1], "%)"),
+    y = paste0("PC2 (", pca.var.per[2], "%)")
+  ) +
+  theme_minimal()  # Optional: apply a clean theme
+
+pcaplot
+```
+
+```{r}
+# Save the plot to a file
+#ggsave("pcaplot_rawgenecounts.png", pcaplot, width = 12, height = 10, dpi = 300)
+```
+
+```{r}
+# Log10 transform the gene counts (add 1 to avoid log10(0))
+log_gene_counts_matrix <- as.matrix(log10(gene_counts + 1))
+
+boxplot <- boxplot(log_gene_counts_matrix, 
+        main = "Boxplot of Gene Counts Across Samples", 
+        xlab = "Samples", 
+        ylab = "Gene Counts", 
+        las = 2,  # Rotate x-axis labels if needed
+        col = "lightblue", 
+        border = "blue",
+        notch = TRUE)  # Add notches to show confidence intervals around medians
+
+boxplot
+```
+
+```{r}
+library(ggplot2)
+library(reshape2)
+
+# Log10 transform the gene counts (add 1 to avoid log10(0))
+log_gene_counts_matrix <- as.matrix(log10(gene_counts + 1))
+
+# Convert matrix to data frame for ggplot2
+df_long <- melt(log_gene_counts_matrix)
+
+# Create the violin plot with dots
+ggplot(df_long, aes(x = Var2, y = value)) +
+  geom_violin(trim = FALSE, fill = "lightblue", color = "blue") +  # Violin plot
+  geom_boxplot(width = 0.1, fill = "white", color = "blue", notch = TRUE) +  # Boxplot within violin plot
+  geom_jitter(width = 0.2, size = 0.8, alpha = 0.6, color = "black") +  # Add dots (jittered to avoid overlap)
+  labs(title = "Violin Plot of Gene Counts Across Samples with Dots",
+       x = "Samples",
+       y = "Gene Counts (log10)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))  # Rotate x-axis labels if needed
+
+
+```
+
+```{r}
+# Log10 transform the gene counts (add 1 to avoid log10(0))
+log_tpm <- as.matrix(log10(TPM + 1))
+
+boxplot <- boxplot(log_tpm, 
+        main = "Boxplot of TPM Across Samples", 
+        xlab = "Samples", 
+        ylab = "TPM", 
+        las = 2,  # Rotate x-axis labels if needed
+        col = "lightblue", 
+        border = "blue",
+        notch = TRUE)  # Add notches to show confidence intervals around medians
+
+boxplot
+```
+
+```{r}
+# Save the plot to a file
+#ggsave("boxplot.png", boxplot, width = 12, height = 10, dpi = 300)
+```
+
+```{r}
+count_matrix <- as.matrix(gene_counts)
+metadata <- read.csv("E1E2_metadata.csv")
+metadata <- as.data.frame(metadata)
+
+View(count_matrix)
+View(metadata)
+```
+
+```{r}
+View(count_matrix[,1:9])
+View(metadata[1:9,])
+```
+
+```{r}
+count_matrix_filtered <- count_matrix[rowSums(count_matrix >= 10) > 0, ]
+
+View(count_matrix_filtered)
+
+
+```
+
+```{r}
+dim(count_matrix_filtered)
+```
+
+```{r}
+# Check if there are any non-integer values
+any(!is.integer(count_matrix_filtered))  # Should return TRUE if there are non-integer values
+# Convert count data to integers
+count_matrix <- as.matrix(round(count_matrix_filtered))
+View(count_matrix_filtered)
+
+#write.csv(count_matrix_filtered, file = "gene_counts_filtered10.csv", row.names = TRUE)
+```
+
+#perform gene_enrichment on the wtpro list and then the b12pro list.
+
+```{r}
+library(clusterProfiler)
+library(org.Hs.eg.db)  # Change this to your organism, e.g., org.Mm.eg.db for mouse
+library(enrichplot)
+library(ggplot2)
+library(tidyverse)
+
+```
+
+```{r}
+progene <- read.csv("list_wtpro_list_b12pro_RNAseq.csv")
+colnames(progene)
+```
+
+```{r}
+# Convert gene_id column to uppercase
+progene$common_wtpro_geneid_RNA <- toupper(progene$common_wtpro_geneid_RNA)
+progene$common_b12pro_geneid_RNA <- toupper(progene$common_b12pro_geneid_RNA)
+progene$background_geneid_RNA <- toupper(progene$background_geneid_RNA)
+
+```
+
+```{r}
+
+go_enrichment_wtpro <- enrichGO(gene = progene$common_wtpro_geneid_RNA, 
+                             OrgDb = org.Hs.eg.db, 
+                             keyType = "SYMBOL", 
+                             ont = "BP", 
+                             pAdjustMethod = "BH",
+                            pvalueCutoff = 0.05,
+                            qvalueCutoff = 0.2,
+                             universe = progene$background_geneid_RNA
+                            ) 
+
+```
+
+```{r}
+barplot(go_enrichment_wtpro)
+```
+
+```{r}
+
+# Convert the enrichGO result to a data frame
+go_df <- as.data.frame(go_enrichment_wtpro)
+
+# Filter significant GO terms (adjust p-value < 0.05)
+go_df_significant <- go_df %>%
+  filter(p.adjust < 0.05)
+
+# Select top 10 significant GO terms (based on adjusted p-value or any other metric)
+go_df_top <- go_df_significant %>%
+  arrange(p.adjust) %>%
+  head(40)
+
+# Create a ggplot bar plot of the top GO terms
+ggplot(go_df_top, aes(x = reorder(Description, -p.adjust), y = -log10(p.adjust))) + 
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +  # Flip the axes to make it more readable
+  theme_minimal() +
+  labs(title = "Top 40 GO Enrichment Terms for WT Pro Genes",
+       x = "GO Term",
+       y = "-log10 Adjusted P-value") +
+  theme(axis.text.y = element_text(size = 10),  # Adjust font size for readability
+        plot.title = element_text(hjust = 0.5))  # Center the plot title
+
+```
+
+```{r}
+go_enrichment_b12pro <- enrichGO(gene = progene$common_b12pro_geneid_RNA, 
+                             OrgDb = org.Hs.eg.db, 
+                             keyType = "SYMBOL", 
+                             ont = "BP", 
+                             pAdjustMethod = "BH",
+                            pvalueCutoff = 0.05,
+                            qvalueCutoff = 0.2,
+                             universe = progene$background_geneid_RNA
+                            ) 
+```
+
+```{r}
+barplot(go_enrichment_b12pro)
+```
+
+```{r}
+# Convert the enrichGO result for b12pro to a data frame
+go_df_b12pro <- as.data.frame(go_enrichment_b12pro)
+
+# Filter significant GO terms (adjusted p-value < 0.05)
+go_df_b12pro_significant <- go_df_b12pro %>%
+  filter(p.adjust < 0.05)
+
+# Select top 10 significant GO terms (based on adjusted p-value)
+go_df_b12pro_top <- go_df_b12pro_significant %>%
+  arrange(p.adjust) %>%
+  head(40)
+
+# Create a ggplot bar plot of the top GO terms for b12pro
+ggplot(go_df_b12pro_top, aes(x = reorder(Description, -p.adjust), y = -log10(p.adjust))) + 
+  geom_bar(stat = "identity", fill = "darkorange") +
+  coord_flip() +  # Flip the axes to make it more readable
+  theme_minimal() +
+  labs(title = "Top 40 GO Enrichment Terms for B12 Pro Genes",
+       x = "GO Term",
+       y = "-log10 Adjusted P-value") +
+  theme(axis.text.y = element_text(size = 10),  # Adjust font size for readability
+        plot.title = element_text(hjust = 0.5))  # Center the plot title
+
+```
+
+```{r}
+#write.csv(as.data.frame(go_enrichment_wtpro), file = "go_enrichment_allwtpro.csv.06232025")
+#write.csv(as.data.frame(go_enrichment_b12pro), file = "go_enrichment_allb12pro.csv.06232025")
+
+```
+
+
+#merging the RNAseq data together for the producer vs noproducer
+
+```{r}
+data2 <- read.csv("dds_clone1_1treated_vs_wt.csv")
+data3 <- read.csv("dds_clone1_3treated_vs_wt.csv")
+data4 <- read.csv("dds_B12_17treated_vs_B12wt.csv")
+data5 <- read.csv("dds_B12_21treated_vs_B12wt.csv")
+View(data2)
+```
+
+```{r}
+# Merge data step-by-step
+merged_data <- merge(data2, data3, by = "geneid", all = TRUE)
+merged_data <- merge(merged_data, data4, by = "geneid", all = TRUE)
+merged_data <- merge(merged_data, data5, by = "geneid", all = TRUE)
+View(merged_data)
+```
+
+```{r}
+#write.csv(merged_data, "merged_dds_provsnonpro.csv")
+```
+
+```{r}
+nonpro_genes <- read.csv("common_wtproandb12pro_negativeFC_RNAseq_06232025.csv")
+nrow(nonpro_genes)
+```
+
+#performing enrichment on the ~1100 genes that are common in all nonproducers.Go enrichment on genes in wtproandb12pro negative fold change ( <0), and padj < 0.05 wiht background genes (transcriptomic gene filtered for gene count >10 in our samples). 
+
+```{r}
+# Convert gene_id column to uppercase
+nonpro_genes$common_geneid_negativeFC_transcriptomic <- toupper(nonpro_genes$common_geneid_negativeFC_transcriptomic)
+nonpro_genes$gene_id_background_genecounts_.10 <- toupper (nonpro_genes$gene_id_background_genecounts_.10)
+
+```
+
+```{r}
+go_enrichment_nonpro <- enrichGO(gene = nonpro_genes$common_geneid_negativeFC_transcriptomic, 
+                             OrgDb = org.Hs.eg.db, 
+                             keyType = "SYMBOL", 
+                             ont = "BP", 
+                             pAdjustMethod = "BH",
+                            pvalueCutoff = 0.05,
+                            qvalueCutoff = 0.2, 
+                            universe = nonpro_genes$gene_id_background_genecounts_.10
+                            ) 
+
+```
+
+```{r}
+barplot(go_enrichment_nonpro)
+```
+
+```{r}
+#write.csv(go_enrichment_nonpro,"enrichment_in_all_nonpro_06232025.csv")
+```
+
+#selected gene enrichment terms imported from excel 
+```{r}
+selected_enrich_nonpro <- read.csv("selected_enrichment_in_all_nonpro_06232025.csv")
+colnames(selected_enrich_nonpro)
+```
+
+```{r}
+# Load necessary libraries
+library(ggplot2)
+
+# Basic dot plot with gene count (Count) on the x-axis
+ggplot(selected_enrich_nonpro, aes(x = Count, 
+                         y = reorder(Description, Count))) +
+  geom_point(aes(size = Count, color = p.adjust)) +
+  scale_color_gradient(low = "blue", high = "red") + # Color by adjusted p-value
+  labs(title = "Gene enrichment in RNAseq of Genes 
+  in All Nonproducers",
+       x = "Gene Count",
+       y = "Term Description",
+       color = "Adjusted P-value",
+       size = "Gene Count") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 8)) # Adjust y-axis label size for readability
+
+```
+
+
+
+# common genes between all producers and genes that are different
+
+```{r}
+wtproandb12pro <- read.csv("list_wtpro_list_b12pro_RNAseq.csv")
+wtproandb12pro
+```
+
+```{r}
+# Find common genes (intersection)
+common_genes <- intersect(wtproandb12pro$common_wtpro_geneid_RNA, wtproandb12pro$common_b12pro_geneid_RNA)
+
+# Find genes in wtpro only
+unique_wtpro <- setdiff(wtproandb12pro$common_wtpro_geneid_RNA, wtproandb12pro$common_b12pro_geneid_RNA)
+
+# Find genes in b12 only
+unique_b12pro <- setdiff(wtproandb12pro$common_b12pro_geneid_RNA, wtproandb12pro$common_wtpro_geneid_RNA)
+```
+
+```{r}
+# Create separate tables for each group
+common_genes_table <- data.frame(
+  Category = rep("Common", length(common_genes)),
+  Gene = common_genes
+)
+
+unique_wtpro_table <- data.frame(
+  Category = rep("Unique to wtpro", length(unique_wtpro)),
+  Gene = unique_wtpro
+)
+
+unique_b12pro_table <- data.frame(
+  Category = rep("Unique to b12pro", length(unique_b12pro)),
+  Gene = unique_b12pro
+)
+
+# View the separate tables
+print("Common Genes Table:")
+print(common_genes_table)
+
+print("Unique Genes in wtpro Table:")
+print(unique_wtpro_table)
+
+print("Unique Genes in b12pro Table:")
+print(unique_b12pro_table)
+```
+
+```{r}
+nrow(common_genes_table)
+```
+
+```{r}
+dim(unique_wtpro_table)
+dim(unique_b12pro_table)
+```
+
+```{r}
+# Export the tables as CSV files
+#write.csv(common_genes_table, "common_pro_genes_06232025.csv", row.names = FALSE)
+#write.csv(unique_wtpro_table, "unique_wtpro_06232025.csv", row.names = FALSE)
+#write.csv(unique_b12pro_table, "unique_b12pro_06232025.csv", row.names = FALSE)
+
+```
+
+Perform gene enrichment on the commonpro, unique_wtpro, and unique_b12pro
+
+```{r}
+library(clusterProfiler)
+library(org.Hs.eg.db)  # this is for human
+library(enrichplot)
+library(ggplot2)
+library(tidyverse)
+```
+
+#GO on all common genes in producers
+
+```{r}
+
+# Convert gene_id column to uppercase
+common_genes_table$Gene <- toupper(common_genes_table$Gene)
+wtproandb12pro$background_geneid_RNA <- toupper (wtproandb12pro$background_geneid_RNA)
+
+```
+
+```{r}
+go_enrichment_commonpro <- enrichGO(gene = common_genes_table$Gene, 
+                             OrgDb = org.Hs.eg.db, 
+                             keyType = "SYMBOL", 
+                             ont = "BP", 
+                             pAdjustMethod = "BH",
+                            pvalueCutoff = 0.05,
+                            qvalueCutoff = 0.2, 
+                            universe = wtproandb12pro$background_geneid_RNA
+                            ) 
+
+```
+
+```{r}
+barplot(go_enrichment_commonpro)
+```
+```{r}
+#export go enrichment file
+#write.csv(go_enrichment_commonpro , "GO_enrichment_common_pro_genes_06232025.csv", row.names = FALSE)
+```
+
+
+#graph selected go enrichment in all producers
+
+
+```{r}
+library(ggplot2)
+
+# Read the data
+selected_go_enrichment_commonpro <- read.csv("selected_go_enrichment_commonpro_06232025.csv")
+
+# Dot plot with gene count (Count) on the x-axis
+ggplot(selected_go_enrichment_commonpro, aes(x = Count, 
+                         y = reorder(Description, Count))) +
+  geom_point(aes(size = Count, color = -log10(p.adjust))) +
+  scale_color_gradient(low = "blue", high = "red") + # Color by adjusted p-value
+  labs(title = "Gene enrichment in RNAseq of 
+  Genes in All Producers",
+       x = "Gene Count",
+       y = "Term Description",
+       color = "-log10 (Adjusted P-value)",
+       size = "Gene Count") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 8)) # Adjust y-axis label size for readability
+```
+
+
+```{r}
+# Check the first few rows to understand the data
+head(selected_go_enrichment_commonpro)
+
+# Convert GeneRatio to decimal (if necessary, e.g., "5/100" to 0.05)
+selected_go_enrichment_commonpro$GeneRatio <- sapply(selected_go_enrichment_commonpro$GeneRatio, function(x) eval(parse(text = x)))
+
+# Convert p.adjust to -log10 for clearer visualization of significance
+selected_go_enrichment_commonpro$log_padj <- -log10(selected_go_enrichment_commonpro$p.adjust)
+
+# Select the top 15 GO terms based on GeneRatio
+top_15_go_enrichment_commonpro <- head(selected_go_enrichment_commonpro[order(-selected_go_enrichment_commonpro$GeneRatio), ], 50)
+
+# Create the dot plot with ggplot2
+ggplot(top_15_go_enrichment_commonpro, aes(x = GeneRatio, y = reorder(Description, GeneRatio), size = log_padj, color = log_padj)) +
+  geom_point(alpha = 0.8) +  # Slight transparency for better visualization
+  scale_color_gradient(low = "lightblue", high = "darkblue", name = "-log10 Adj. P-value") +
+  scale_size_continuous(name = "Count", range = c(3, 8)) +
+  labs(title = "GO Term Enrichment for Genes in all Producers", 
+       x = "Gene Ratio", y = "GO Terms") +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 8),
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Angle x-axis labels for better readability
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold")
+  )
+```
+```{r}
+ggplot(top_15_go_enrichment_commonpro, aes(x = GeneRatio, y = reorder(Description, GeneRatio), 
+       size = Count, color = log_padj)) +   # Use Count for size
+  geom_point(alpha = 0.8) +
+  scale_color_gradient(low = "lightblue", high = "darkblue", name = "-log10 Adj. P-value") +
+  scale_size_continuous(name = "Gene Count", range = c(3, 8)) +  # Size reflects count
+  labs(title = "GO Term Enrichment for Genes in all Producers", 
+       x = "Gene Ratio", y = "GO Terms") +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 8),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold")
+  )
+
+```
+
+
+
+#GO on genes only in wtpro(CTRlpro)
+```{r}
+
+# Convert gene_id column to uppercase
+unique_wtpro_table$Gene <- toupper(unique_wtpro_table$Gene)
+
+```
+
+```{r}
+go_enrichment_unique_wtpro <- enrichGO(gene = unique_wtpro_table$Gene, 
+                             OrgDb = org.Hs.eg.db, 
+                             keyType = "SYMBOL", 
+                             ont = "BP", 
+                             pAdjustMethod = "BH",
+                            pvalueCutoff = 0.05,
+                            qvalueCutoff = 0.2
+                            ) 
+
+
+barplot(go_enrichment_unique_wtpro)
+```
+
+```{r}
+selected_go_enrichment_unique_wtpro <- read.csv("selected_go_enrichment_unique_wtpro_0211202.csv")
+```
+
+```{r}
+# Check the first few rows to understand the data
+head(selected_go_enrichment_unique_wtpro)
+
+# Convert GeneRatio to decimal (if necessary, e.g., "5/100" to 0.05)
+selected_go_enrichment_unique_wtpro$GeneRatio <- sapply(selected_go_enrichment_unique_wtpro$GeneRatio, function(x) eval(parse(text = x)))
+
+# Convert p.adjust to -log10 for clearer visualization of significance
+selected_go_enrichment_unique_wtpro$log_padj <- -log10(selected_go_enrichment_unique_wtpro$p.adjust)
+
+# Create the dot plot for all genes
+ggplot(selected_go_enrichment_unique_wtpro, aes(x = GeneRatio, y = reorder(Description, GeneRatio), size = log_padj, color = log_padj)) +
+  geom_point(alpha = 0.8) +  # Slight transparency for better visualization
+  scale_color_gradient(low = "lightblue", high = "darkblue", name = "-log10 Adj. P-value") +
+  scale_size_continuous(name = "-log10 Adj. P-value", range = c(3, 8)) +
+  labs(title = "GO Term Enrichment for Genes only Observed in WT Pro", 
+       x = "Gene Ratio", y = "GO Terms") +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 8),
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Angle x-axis labels for better readability
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold")
+  )
+```
+
+#GO terms only in B12pro (CL1pro)
+```{r}
+
+# Convert gene_id column to uppercase
+unique_b12pro_table$Gene <- toupper(unique_b12pro_table$Gene)
+head(unique_b12pro_table)
+
+```
+
+```{r}
+go_enrichment_unique_b12pro <- enrichGO(gene = unique_b12pro_table$Gene, 
+                             OrgDb = org.Hs.eg.db, 
+                             keyType = "SYMBOL", 
+                             ont = "BP", 
+                             pAdjustMethod = "BH",
+                            pvalueCutoff = 0.05,
+                            qvalueCutoff = 0.2
+                            ) 
+
+
+barplot(go_enrichment_unique_b12pro)
+```
+
+```{r}
+select_go_enrichment_unique_b12pro <-read.csv("selected_go_enrichment_unique_b12pro_02112025.csv")
+```
+
+```{r}
+
+# Check the first few rows to understand the structure of the data
+head(select_go_enrichment_unique_b12pro)
+
+# If GeneRatio is in a string format (e.g., "5/100"), convert it to a decimal
+select_go_enrichment_unique_b12pro$GeneRatio <- sapply(select_go_enrichment_unique_b12pro$GeneRatio, function(x) eval(parse(text = x)))
+
+# Convert p.adjust to -log10 for better visualization
+select_go_enrichment_unique_b12pro$log_padj <- -log10(select_go_enrichment_unique_b12pro$p.adjust)
+
+# Create a dot plot (scatter plot) to visualize GO enrichment results
+ggplot(select_go_enrichment_unique_b12pro, aes(x = GeneRatio, y = reorder(Description, GeneRatio), size = log_padj, color = log_padj)) +
+  geom_point(alpha = 0.8) +  # Slight transparency for better visualization
+  scale_color_gradient(low = "lightblue", high = "darkblue", name = "-log10 Adj. P-value") +
+  scale_size_continuous(name = "-log10 Adj. P-value", range = c(3, 8)) +
+  labs(title = "GO Term Enrichment for Genes only Observed in CL1 Pro", 
+       x = "Gene Ratio", y = "GO Terms") +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 8),
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Angle x-axis labels for better readability
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold")
+  )
+```
+
+```{r}
+#write.csv(go_enrichment_commonpro, "go_enrichment_commonpro_02112025.csv", row.names = FALSE)
+#write.csv(go_enrichment_unique_wtpro, "go_enrichment_unique_wtpro_02112025.csv", row.names = FALSE)
+#write.csv(go_enrichment_unique_b12pro, "go_enrichment_unique_b12pro_02112025.csv", row.names = FALSE)
+```
