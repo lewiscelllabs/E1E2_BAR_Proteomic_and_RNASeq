@@ -1,0 +1,1172 @@
+---
+title: "Hepc_Bar_analysis"
+format: pdf
+editor: visual
+---
+
+```{r}
+library("DEP")
+library("dplyr")
+library("tidyverse")
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(biomaRt)
+```
+
+```{r}
+data <- read.csv ("proteinGroups.csv", header=TRUE)
+dim (data)
+View(data)
+```
+
+```{r}
+# We filter for contaminant proteins and decoy database hits, which are indicated by "+" in the columns "Potential.contaminants" and "Reverse", respectively.
+data_rm <- filter(data, Only.identified.by.site != "+")
+dim(data_rm)
+#The “LFQ.intensity” columns will be used for subsequent analysis.
+
+```
+
+```{r}
+# Are there any duplicated protein.IDs names?
+data_rm$Gene.Names %>% duplicated() %>% any()
+```
+
+```{r}
+View(data_rm)
+```
+
+```{r}
+# Group by gene name, count duplicates, and show only duplicates
+data_rm %>%
+  group_by(Gene.Names) %>%
+  summarise(frequency = n()) %>%
+  arrange(desc(frequency)) %>%
+  filter(frequency > 1)
+```
+
+```{r}
+# Make unique names using the annotation in the "Gene.names" column as primary names and the annotation in "Protein.IDs" as name for those that do not have an gene name.
+data_unique <- make_unique(data_rm, "Gene.Names", "Majority.protein.IDs", delim = ";")
+
+# Are there any duplicated names?
+data$name %>% duplicated() %>% any()
+View(data_unique)
+
+```
+
+```{r}
+#filter for the LFQ samples from the data_unique list
+filtered_data_LFQ<- data_unique[,132:149]
+head(filtered_data_LFQ)
+
+filtered_data_LFQ <- data.frame(data_unique$name, filtered_data_LFQ)
+
+View(filtered_data_LFQ)
+
+#write.csv(filtered_data_LFQ, file = "filtered_data_LFQ.csv", row.names = TRUE)
+```
+
+```{r}
+colnames(filtered_data_LFQ)
+```
+
+```{r}
+# Generate a SummarizedExperiment object using an experimental design
+LFQ_columns <- grep("LFQ.", colnames(data_unique)) # get LFQ column numbers
+experimental_design <- read.csv("experimental_design.csv")
+data_se <- make_se(data_unique, LFQ_columns, experimental_design)
+
+# Generate a SummarizedExperiment object using an experimental design
+LFQ_columns <- grep("LFQ.", colnames(data_unique)) # get LFQ column numbers
+data_se_parsed <- make_se_parse(data_unique, LFQ_columns)
+
+data_se
+```
+
+```{r}
+# Check for duplicate row names
+any(duplicated(rownames(data_unique)))
+
+```
+
+```{r}
+#Filter on missing values 
+# Plot a barplot of the protein identification overlap between samples
+plot_frequency(data_se)
+```
+
+```{r}
+
+# Less stringent filtering:
+# Filter for proteins that are identified in 2 out of 3 replicates of at least one condition
+data_filt <- filter_missval(data_se, thr = 1)
+```
+
+```{r}
+plot_numbers(data_filt)
+```
+
+```{r}
+# Plot the first and second principal components
+plot_pca(data_filt, x = 1, y = 2, n = 500, point_size = 4)
+```
+
+```{r}
+# Normalize the data
+data_norm <- normalize_vsn(data_filt)
+```
+
+```{r}
+# Visualize normalization by boxplots for all samples before and after normalization
+plot_normalization(data_filt, data_norm)
+```
+
+```{r}
+# Generate a long data.frame
+post_norm <- get_df_wide(data_norm)
+View(post_norm)
+# Write the wide-format data frame to a CSV file
+#write.csv(post_norm, "hepc_post_norm.csv", row.names = FALSE)
+
+```
+
+```{r}
+# Plot the first and second principal components
+plot_pca(data_norm, x = 1, y = 2, n = 500, point_size = 4)
+```
+
+Impute data for missing values
+
+```{r}
+# Plot a heatmap of proteins with missing values
+plot_missval(data_filt)
+```
+
+```{r}
+# Plot intensity distributions and cumulative fraction of proteins with and without missing values
+plot_detect(data_filt)
+
+```
+
+```{r}
+# Impute missing data using random draws from a manually defined left-shifted Gaussian distribution (for MNAR)
+data_imp_man <- impute(data_norm, fun = "man", shift = 1.8, scale = 0.3)
+```
+
+```{r}
+# Plot intensity distributions before and after imputation
+plot_imputation(data_norm, data_imp_man)
+```
+
+```{r}
+# Generate a long data.frame
+post_impute <- get_df_wide(data_imp_man)
+View(post_impute)
+# Write the wide-format data frame to a CSV file
+#write.csv(post_impute, "hepc_post_impute.csv", row.names = FALSE)
+
+```
+
+```{r}
+# Plot the first and second principal components
+plot_pca(data_imp_man, x = 1, y = 2, n = 500, point_size = 4)
+```
+
+# plot heatmap of the significant PPI using ggplot after imputations
+
+```{r}
+# Load the pheatmap package
+library(pheatmap)
+library(SummarizedExperiment)  # or the specific package you're using that provides assay()
+
+
+# Extract the expression data from the 'dep' object
+expression_data <- assay(data_imp_man)
+
+# Calculate the Pearson correlation matrix
+cor_matrix <- cor(expression_data, method = "pearson")
+
+# Plot the correlation matrix
+pheatmap(cor_matrix, 
+         color = colorRampPalette(c("blue", "white", "red"))(50), 
+         cluster_rows = TRUE, 
+         cluster_cols = TRUE, 
+         show_rownames = TRUE, 
+         show_colnames = TRUE)
+```
+
+```{r}
+
+# Load the pheatmap package
+library(pheatmap)
+
+# Extract the expression data from the 'data_imp_man' object
+expression_data <- assay(data_imp_man)
+
+# Scale the data (mean-center each protein)
+expression_data_scaled <- t(scale(t(expression_data), center = TRUE, scale = FALSE))
+
+# Convert colData(data_imp_man) to a data frame
+annotation_col <- as.data.frame(colData(data_imp_man))
+
+# Ensure row names of annotation_col match column names of expression_data
+rownames(annotation_col) <- colnames(expression_data_scaled)
+
+# Subset the annotation data
+annotation_col <- annotation_col[, c("condition", "replicate")]
+
+# Convert 'condition' to a factor with explicit levels
+annotation_col$condition <- factor(annotation_col$condition, 
+                                   levels = c("pro_CTRL_1", "pro_CTRL_3", "nonpro_CTRL", "pro_CL1_17", "pro_CL1_21", "nonpro_CL1"))
+# Clean 'replicate' levels
+annotation_col$replicate <- factor(annotation_col$replicate, levels = c("1", "2", "3"))
+annotation_col$replicate <- droplevels(annotation_col$replicate)
+
+# Define colors for all conditions
+condition_colors <- c(
+  "nonpro_CL1" = "#F8766D",
+  "nonpro_CTRL" = "#ABA300", 
+   "pro_CL1_17" = "#0CB702", 
+  "pro_CL1_21" = "#00BFC4",
+  "pro_CTRL_1" = "#00A9FF", 
+  "pro_CTRL_3" = "#ED68ED"
+)
+
+annotation_colors <- list(
+  condition = condition_colors,
+  replicate = c("1" = "darkseagreen", "2" = "#0969A2", "3" = "burlywood3")
+)
+
+
+# Plot the heatmap with annotations
+pheatmap(
+  expression_data_scaled,
+  color = colorRampPalette(c("blue", "white", "red"))(50),
+  cluster_rows = TRUE,
+  cluster_cols = TRUE,
+  show_rownames = FALSE,
+  show_colnames = TRUE,
+  annotation_col = annotation_col,
+  annotation_colors = annotation_colors
+)
+```
+
+#Performed welch's t-test in excel each producer against its parental cell line. Import the file here to R to perform padj using Benjamini-Hochberg.
+
+```{r}
+data_ttest <- read.csv("hepc_post_impute_ttest.csv")
+View(data_ttest)
+```
+
+```{r}
+colnames(data_ttest)
+```
+
+```{r}
+# Adjust p-values for multiple comparisons
+data_ttest$adj_pval_b12_17_vs_parent <- p.adjust(data_ttest$welch.pval.b12_17.vs.parent, method = "BH")
+data_ttest$adj_pval_b12_21_vs_parent <- p.adjust(data_ttest$welch.pval.b12_21.vs.parent, method = "BH")
+data_ttest$adj_pval_wt_1_vs_parent <- p.adjust(data_ttest$welch.pval.wt_1.vs.parent, method = "BH")
+data_ttest$adj_pval_wt_3_vs_parent <- p.adjust(data_ttest$welch.pval.wt_3.vs.parent, method = "BH")
+
+```
+
+```{r}
+View(data_ttest)
+```
+
+```{r}
+# Ensure data_ttest is a data frame
+data_ttest <- as.data.frame(data_ttest)
+
+# Initialize columns to store p-values and adjusted p-values
+data_ttest$welch_pval_wtprovsB12pro <- NA
+data_ttest$adj_pval_wtprovsB12pro <- NA
+
+# Loop through each row (gene) to perform Welch's t-test
+for (i in 1:nrow(data_ttest)) {
+  # Group 1: pro_wt samples (wt_1 and wt_3)
+  group1 <- c(data_ttest$pro_wt_1_1[i], data_ttest$pro_wt_1_2[i], data_ttest$pro_wt_1_3[i], 
+              data_ttest$pro_wt_3_1[i], data_ttest$pro_wt_3_2[i], data_ttest$pro_wt_3_3[i])
+  
+  # Group 2: pro_B12 samples (B12_17 and B12_21)
+  group2 <- c(data_ttest$pro_B12_17_1[i], data_ttest$pro_B12_17_2[i], data_ttest$pro_B12_17_3[i], 
+              data_ttest$pro_B12_21_1[i], data_ttest$pro_B12_21_2[i], data_ttest$pro_B12_21_3[i])
+  
+  # Perform Welch's t-test for the current gene
+  t_test_result <- t.test(group1, group2, var.equal = FALSE)
+  
+  # Store p-value in the corresponding row
+  data_ttest$welch_pval_wtprovsB12pro[i] <- t_test_result$p.value
+}
+
+# Adjust p-values using the Benjamini-Hochberg method (BH)
+data_ttest$adj_pval_wtprovsB12pro <- p.adjust(data_ttest$welch_pval_wtprovsB12pro, method = "BH")
+
+# View the updated data frame
+head(data_ttest)
+
+
+
+```
+
+```{r}
+#write.csv(data_ttest, "hepc_post_impute_padj_wtprovsb12pro.csv", row.names = FALSE)
+```
+
+#Imputed file was exported as excel file, where filtering was done one the sample with filtering criteria: proteins detected in the producer cell line but not in the parental cell line, and proteins showing significant differences between the producer and parental cell lines (fold change \> 0 and adjusted p-value \< 0.05).
+
+```{r}
+data_padj <- read.csv("hepc_post_impute_padj_wtprovsb12pro.csv")
+View(data_padj)
+```
+
+```{r}
+colnames(data_padj)
+```
+
+#perform volcano plots of the producers vs parental cell line using padjusted (< 0.05) and log2FC (> 0). 
+
+#CL1#17 vs parental
+
+```{r}
+# Load the necessary libraries
+library(ggplot2)
+library(ggrepel)
+library(dplyr)
+
+# Define your significance thresholds (adjust these values as needed)
+significance_threshold <- 0.05
+fold_change_threshold <- 0  # Using absolute log2 fold change of 0 
+
+# Create Significant_PPIs column with proper error handling
+data_padj <- data_padj %>%
+  mutate(Significant_PPIs = case_when(
+    adj_pval_b12_17_vs_parent < !!significance_threshold & 
+      log2FC_B12_17 > !!fold_change_threshold ~ "Upregulated PPI",
+    adj_pval_b12_17_vs_parent < !!significance_threshold & 
+      log2FC_B12_17 < -!!fold_change_threshold ~ "Downregulated PPI",
+    TRUE ~ "Not Significant PPI"
+  ))
+
+# Verify the column was created
+head(data_padj$Significant_PPIs)
+table(data_padj$Significant_PPIs)
+
+# Now create the volcano plot
+volcano_plot_PPIs <- ggplot(data_padj, 
+                           aes(x = log2FC_B12_17, 
+                               y = -log10(adj_pval_b12_17_vs_parent))) +
+  geom_point(aes(color = Significant_PPIs), alpha = 0.7, size = 2) +
+  scale_color_manual(values = c("Upregulated PPI" = "red",
+                               "Downregulated PPI" = "blue",
+                               "Not Significant PPI" = "grey80")) +
+  labs(title = "Volcano Plot: Significant PPIs CL1_17 vs Parent",
+       x = "Log2 Fold Change",
+       y = "-Log10 Adjusted P-value",
+       color = "PPI Status") +
+  theme_minimal() +
+  geom_hline(yintercept = -log10(significance_threshold), 
+             linetype = "dashed", color = "black") +
+  geom_vline(xintercept = c(-fold_change_threshold, fold_change_threshold), 
+             linetype = "dashed", color = "black") +
+  geom_text_repel(data = data_padj %>% 
+                   filter(Significant_PPIs %in% c("Upregulated PPI", "Downregulated PPI")) %>%
+                   arrange(adj_pval_b12_17_vs_parent) %>% 
+                   head(5),
+                 aes(label = name), 
+                 size = 3, 
+                 box.padding = 0.5,
+                 max.overlaps = Inf)
+
+print(volcano_plot_PPIs)
+```
+
+
+#CL1_21 vs parental
+
+```{r}
+# Load the necessary libraries
+library(ggplot2)
+library(ggrepel)
+library(dplyr)
+
+# Define your significance thresholds (adjust these values as needed)
+significance_threshold <- 0.05
+fold_change_threshold <- 0  # Using absolute log2 fold change of 1 as default
+
+# Create Significant_PPIs column for CL1_21 vs Parent comparison
+data_padj <- data_padj %>%
+  mutate(Significant_PPIs = case_when(
+    adj_pval_b12_21_vs_parent < !!significance_threshold & 
+      log2FC_B12_21 > !!fold_change_threshold ~ "Upregulated PPI",
+    adj_pval_b12_21_vs_parent < !!significance_threshold & 
+      log2FC_B12_21 < -!!fold_change_threshold ~ "Downregulated PPI",
+    TRUE ~ "Not Significant PPI"
+  ))
+
+# Verify the column was created
+head(data_padj$Significant_PPIs)
+table(data_padj$Significant_PPIs)
+
+# Now create the volcano plot for CL1_21 vs Parent
+volcano_plot_PPIs_21 <- ggplot(data_padj, 
+                              aes(x = log2FC_B12_21, 
+                                  y = -log10(adj_pval_b12_21_vs_parent))) +
+  geom_point(aes(color = Significant_PPIs), alpha = 0.7, size = 2) +
+  scale_color_manual(values = c("Upregulated PPI" = "red",
+                               "Downregulated PPI" = "blue",
+                               "Not Significant PPI" = "grey80")) +
+  labs(title = "Volcano Plot: Significant PPIs CL1_21 vs Parent",
+       x = "Log2 Fold Change",
+       y = "-Log10 Adjusted P-value",
+       color = "PPI Status") +
+  theme_minimal() +
+  geom_hline(yintercept = -log10(significance_threshold), 
+             linetype = "dashed", color = "black") +
+  geom_vline(xintercept = c(-fold_change_threshold, fold_change_threshold), 
+             linetype = "dashed", color = "black") +
+  geom_text_repel(data = data_padj %>% 
+                   filter(Significant_PPIs %in% c("Upregulated PPI", "Downregulated PPI")) %>%
+                   arrange(adj_pval_b12_21_vs_parent) %>% 
+                   head(5),
+                 aes(label = name), 
+                 size = 3, 
+                 box.padding = 0.5,
+                 max.overlaps = Inf)
+
+print(volcano_plot_PPIs_21)
+```
+
+
+
+# CTRL_1 vs parental cell line
+
+```{r}
+# Load the necessary libraries
+library(ggplot2)
+library(ggrepel)
+library(dplyr)
+
+# Define your significance thresholds (adjust these values as needed)
+significance_threshold <- 0.05
+fold_change_threshold <- 0  # Using absolute log2 fold change of 1 as default
+
+# Create Significant_PPIs column for WT_1 vs Parent comparison
+# Note: You'll need to confirm the correct adjusted p-value column name for this comparison
+# I'm using adj_pval_wt_1_vs_parent as a placeholder - adjust to your actual column name
+data_padj <- data_padj %>%
+  mutate(Significant_PPIs = case_when(
+    adj_pval_wt_1_vs_parent < !!significance_threshold & 
+      log2FC_wt_1 > !!fold_change_threshold ~ "Upregulated PPI",
+    adj_pval_wt_1_vs_parent < !!significance_threshold & 
+      log2FC_wt_1 < -!!fold_change_threshold ~ "Downregulated PPI",
+    TRUE ~ "Not Significant PPI"
+  ))
+
+# Verify the column was created
+head(data_padj$Significant_PPIs)
+table(data_padj$Significant_PPIs)
+
+# Now create the volcano plot for WT_1 vs Parent
+volcano_plot_PPIs_wt1 <- ggplot(data_padj, 
+                               aes(x = log2FC_wt_1, 
+                                   y = -log10(adj_pval_wt_1_vs_parent))) +
+  geom_point(aes(color = Significant_PPIs), alpha = 0.7, size = 2) +
+  scale_color_manual(values = c("Upregulated PPI" = "red",
+                               "Downregulated PPI" = "blue",
+                               "Not Significant PPI" = "grey80")) +
+  labs(title = "Volcano Plot: Significant PPIs WT_1 vs Parent",
+       x = "Log2 Fold Change",
+       y = "-Log10 Adjusted P-value",
+       color = "PPI Status") +
+  theme_minimal() +
+  geom_hline(yintercept = -log10(significance_threshold), 
+             linetype = "dashed", color = "black") +
+  geom_vline(xintercept = c(-fold_change_threshold, fold_change_threshold), 
+             linetype = "dashed", color = "black") +
+  geom_text_repel(data = data_padj %>% 
+                   filter(Significant_PPIs %in% c("Upregulated PPI", "Downregulated PPI")) %>%
+                   arrange(adj_pval_wt_1_vs_parent) %>% 
+                   head(5),
+                 aes(label = name), 
+                 size = 3, 
+                 box.padding = 0.5,
+                 max.overlaps = Inf)
+
+print(volcano_plot_PPIs_wt1)
+```
+
+
+
+#ctrl_3 vs parental cell line
+
+```{r}
+# Load the necessary libraries
+library(ggplot2)
+library(ggrepel)
+library(dplyr)
+
+# Define your significance thresholds (adjust these values as needed)
+significance_threshold <- 0.05
+fold_change_threshold <- 0  # Using absolute log2 fold change of 1 as default
+
+# Create Significant_PPIs column for WT_3 vs Parent comparison
+# Note: Replace 'adj_pval_wt_3_vs_parent' with your actual p-value column name
+data_padj <- data_padj %>%
+  mutate(Significant_PPIs = case_when(
+    adj_pval_wt_3_vs_parent < !!significance_threshold & 
+      log2FC_wt_3 > !!fold_change_threshold ~ "Upregulated PPI",
+    adj_pval_wt_3_vs_parent < !!significance_threshold & 
+      log2FC_wt_3 < -!!fold_change_threshold ~ "Downregulated PPI",
+    TRUE ~ "Not Significant PPI"
+  ))
+
+# Verify the column was created
+head(data_padj$Significant_PPIs)
+table(data_padj$Significant_PPIs)
+
+# Now create the volcano plot for WT_3 vs Parent
+volcano_plot_PPIs_wt3 <- ggplot(data_padj, 
+                               aes(x = log2FC_wt_3, 
+                                   y = -log10(adj_pval_wt_3_vs_parent))) +
+  geom_point(aes(color = Significant_PPIs), alpha = 0.7, size = 2) +
+  scale_color_manual(values = c("Upregulated PPI" = "red",
+                               "Downregulated PPI" = "blue",
+                               "Not Significant PPI" = "grey80")) +
+  labs(title = "Volcano Plot: Significant PPIs WT_3 vs Parent",
+       x = "Log2 Fold Change",
+       y = "-Log10 Adjusted P-value",
+       color = "PPI Status") +
+  theme_minimal() +
+  geom_hline(yintercept = -log10(significance_threshold), 
+             linetype = "dashed", color = "black") +
+  geom_vline(xintercept = c(-fold_change_threshold, fold_change_threshold), 
+             linetype = "dashed", color = "black") +
+  geom_text_repel(data = data_padj %>% 
+                   filter(Significant_PPIs %in% c("Upregulated PPI", "Downregulated PPI")) %>%
+                   arrange(adj_pval_wt_3_vs_parent) %>% 
+                   head(5),
+                 aes(label = name), 
+                 size = 3, 
+                 box.padding = 0.5,
+                 max.overlaps = Inf)
+
+print(volcano_plot_PPIs_wt3)
+```
+
+```{r}
+enrichment_wtpro <- read.csv("wtpro_allsig_gene_enrichment.csv")
+
+```
+
+```{r}
+# Convert necessary columns to numeric if they are not already
+enrichment_wtpro$observed.gene.count <- as.numeric(enrichment_wtpro$observed.gene.count)
+enrichment_wtpro$false.discovery.rate <- as.numeric(enrichment_wtpro$false.discovery.rate)
+
+# Extract the top 20 GO terms by false discovery rate (or any other criteria)
+top_30_enrichment <- head(enrichment_wtpro[order(enrichment_wtpro$false.discovery.rate), ], 30)
+
+# Create the dot plot with FDR on the x-axis
+dotplot <- ggplot(top_30_enrichment, aes(x = -log10(false.discovery.rate), 
+                                         y = reorder(term.description, false.discovery.rate), 
+                                       
+                                         size = observed.gene.count)) +
+  geom_point() + 
+  labs(title = "Top 30 Enriched GO Terms in clone1pro", 
+       x = "-log10(FDR)", 
+       y = "GO Terms",
+       size = "Gene Count") +
+  theme_minimal() +
+  theme(
+    plot.background = element_rect(fill = "white"),
+    text = element_text(color = "black"),
+    axis.text = element_text(color = "black"),
+    plot.title = element_text(size = 14, face = "bold")
+  ) +
+  scale_color_gradient(low = "blue", high = "red")  # Color gradient for gene count
+
+# Display the plot
+print(dotplot)
+
+# Optionally, save the plot to a file
+# ggsave("top_20_enriched_GO_terms_dotplot_fdr_xaxis.png", dotplot, width = 10, height = 8, dpi = 300)
+
+
+
+```
+
+#enrichment on the b12pro significant genes
+
+```{r}
+enrichment_b12pro <- read.csv("B12pro_allsig_gene_enrichment.csv")
+```
+
+```{r}
+colnames(enrichment_b12pro)
+```
+
+```{r}
+# Load the new dataset
+enrichment_b12pro <- read.csv("B12pro_allsig_gene_enrichment.csv")
+
+# Convert necessary columns to numeric if they are not already
+enrichment_b12pro$observed.gene.count <- as.numeric(enrichment_b12pro$observed.gene.count)
+enrichment_b12pro$background.gene.count <- as.numeric(enrichment_b12pro$background.gene.count)
+enrichment_b12pro$false.discovery.rate <- as.numeric(enrichment_b12pro$false.discovery.rate)
+
+# Extract the top 20 GO terms by false discovery rate
+top_20_enrichment_b12pro <- head(enrichment_b12pro[order(enrichment_b12pro$false.discovery.rate), ], 30)
+
+# Create the dot plot with FDR on the x-axis and observed gene count for size
+dotplot_b12pro <- ggplot(top_20_enrichment_b12pro, aes(x = -log10(false.discovery.rate), 
+                                                       y = reorder(term.description, false.discovery.rate), 
+                                                        
+                                                       size = observed.gene.count)) +
+  geom_point() + 
+  labs(title = "Top 30 Enriched GO Terms in B12pro", 
+       x = "-log10(FDR)", 
+       y = "GO Terms",
+       
+       size = "Gene Count") +
+  theme_minimal() +
+  theme(
+    plot.background = element_rect(fill = "white"),
+    text = element_text(color = "black"),
+    axis.text = element_text(color = "black"),
+    plot.title = element_text(size = 14, face = "bold")
+  ) +
+  scale_color_gradient(low = "blue", high = "red")  # Color gradient for gene count
+
+# Display the plot
+print(dotplot_b12pro)
+
+# Optionally, save the plot to a file
+# ggsave("top_20_enriched_GO_terms_b12pro_dotplot_fdr_xaxis.png", dotplot_b12pro, width = 10, height = 8, dpi = 300)
+
+```
+
+```{r}
+common_604MS <- read.csv("MS_604common_imputeabundance.csv")
+colnames(common_604MS)
+View(common_604MS)
+```
+
+```{r}
+# Load necessary library
+library(pheatmap)
+
+# Assuming your data frame is called 'data'
+# Extract relevant columns for heatmap (excluding the 'name' and 'heatmap_604_genes' columns)
+heatmap_data <- common_604MS[, c("pro_B12_17_1", "pro_B12_17_2", "pro_B12_17_3", 
+                         "pro_B12_21_1", "pro_B12_21_2", "pro_B12_21_3",
+                         "pro_wt_1_1", "pro_wt_1_2", "pro_wt_1_3",
+                         "pro_wt_3_1", "pro_wt_3_2", "pro_wt_3_3"
+                         )]
+
+# Set the rownames as the gene names (assuming gene names are in the 'name' column)
+rownames(heatmap_data) <- data$name
+
+# Convert the data to a matrix
+heatmap_matrix <- as.matrix(heatmap_data)
+
+# Generate the heatmap
+pheatmap(heatmap_matrix, 
+         cluster_rows = TRUE,          # Cluster genes
+         cluster_cols = TRUE,          # Cluster conditions
+         scale = "row",                # Normalize values across rows
+         main = "Heatmap of Gene Expression", 
+         fontsize_row = 8,             # Adjust font size for row labels
+         color = colorRampPalette(c("blue", "white", "red"))(50))  # Custom color palette
+
+
+```
+
+#average the producer replicates together
+
+```{r}
+# Calculate the row-wise mean for each set of replicates
+heatmap_data$pro_B12_17_avg <- rowMeans(heatmap_data[, c("pro_B12_17_1", "pro_B12_17_2", "pro_B12_17_3")])
+heatmap_data$pro_B12_21_avg <- rowMeans(heatmap_data[, c("pro_B12_21_1", "pro_B12_21_2", "pro_B12_21_3")])
+heatmap_data$pro_wt_1_avg <- rowMeans(heatmap_data[, c("pro_wt_1_1", "pro_wt_1_2", "pro_wt_1_3")])
+heatmap_data$pro_wt_3_avg <- rowMeans(heatmap_data[, c("pro_wt_3_1", "pro_wt_3_2", "pro_wt_3_3")])
+
+# Create a new matrix with the averaged values
+avg_matrix <- as.matrix(heatmap_data[, c("pro_B12_17_avg", "pro_B12_21_avg", "pro_wt_1_avg", "pro_wt_3_avg")])
+
+
+# Generate the heatmap
+pheatmap(avg_matrix, 
+         cluster_rows = TRUE,          # Cluster genes
+         cluster_cols = TRUE,          # Cluster conditions
+         scale = "row",                # Normalize values across rows
+         main = "Heatmap of  of the 604 Common PPI in All Producers of E1E2", 
+         fontsize_row = 8,             # Adjust font size for row labels
+         color = colorRampPalette(c("blue", "white", "red"))(50))  # Custom color palette
+```
+
+#plot the 604 PPI in the producers
+
+```{r}
+PPI <- read.csv("604_common_MS_BPenrichment.csv")
+colnames(PPI)
+View(PPI)
+```
+
+```{r}
+
+# Convert necessary columns to numeric if they are not already
+PPI$observed.gene.count <- as.numeric(PPI$observed.gene.count)
+PPI$false.discovery.rate <- as.numeric(PPI$false.discovery.rate)
+
+# Extract top 20 GO terms by false discovery rate (or adjust as needed)
+top_50_PPI <- head(PPI[order(PPI$false.discovery.rate), ], 50)
+
+# Create a combined label for the legend
+top_50_PPI$label <- paste("Count:", top_50_PPI$observed.gene.count, "\nAdj P-value:", format(top_50_PPI$false.discovery.rate, scientific = TRUE))
+
+# Create the dot plot with adjusted p-value and gene count
+dot_plot_PPI <- ggplot(top_50_PPI, aes(x = -log10(false.discovery.rate), y = reorder(term.description, false.discovery.rate), size = observed.gene.count, color = false.discovery.rate)) +
+    geom_point() +  # Set point color based on false.discovery.rate
+    scale_color_gradient(low = "blue", high = "red") +  # Gradient for false discovery rate
+    labs(title = "Top 50 Enriched GO Terms in PPI Data",
+         x = "-log10(False Discovery Rate)", 
+         y = "GO Terms") +
+    scale_size_continuous(range = c(3, 10), name = "Observed Gene Count") +  # Adjust point size
+    theme_minimal() +
+    theme(
+        plot.background = element_rect(fill = "white", color = NA),  # White background
+        panel.background = element_rect(fill = "white", color = NA),  # White panel background
+        text = element_text(color = "black"),                         # Black text
+        axis.title = element_text(color = "black"),                   # Black axis titles
+        axis.text = element_text(color = "black"),                    # Black axis text
+        plot.title = element_text(color = "black", size = 14, face = "bold")  # Black title
+    )
+
+# Display the plot
+print(dot_plot_PPI)
+
+# Optionally, save the dot plot to a file
+# ggsave("top_20_PPI_GO_terms_dotplot.png", dot_plot_PPI, width = 10, height = 8, dpi = 300)
+
+```
+
+```{r}
+transport<- read.csv("transport_enrichment_604MS.csv")
+View(transport)
+```
+
+```{r}
+colnames(transport)
+```
+
+```{r}
+
+# Create the dot plot
+ggplot(transport, aes(x = reorder(term.description, observed.gene.count), y = observed.gene.count)) +
+  geom_point(aes(size = strength, color = false.discovery.rate)) +
+  labs(title = "Dot Plot of Transport and Protein Enrichment", 
+       x = "Term Description", 
+       y = "Observed Gene Count", 
+       size = "Strength", 
+       color = "False Discovery Rate") +
+  theme_minimal() +
+  coord_flip() # Flip the axes to make the terms easier to read
+
+```
+
+#plot the transport genes with heatmap using the imputed genes. There's 128 genes for the transport.
+
+```{r}
+transport_heatmap <- read.csv("transport_genes_MS_heatmap.csv")
+view(transport_heatmap)
+```
+
+```{r}
+colnames(transport_heatmap)
+dim(transport_heatmap)
+```
+
+```{r}
+
+# Load the pheatmap package
+library(pheatmap)
+
+# Check the structure of your data
+str(transport_heatmap)
+
+# Extract the gene names (row names) and sample values (numeric data)
+# Assuming the first column contains gene names and the rest are sample data
+row.names(transport_heatmap) <- transport_heatmap$name
+heatmap_data <- transport_heatmap[, -1] # Remove the first column with gene names
+
+# Ensure the numeric columns are in the right format
+heatmap_data <- as.matrix(heatmap_data)
+
+# Create the heatmap
+pheatmap(heatmap_data, 
+         scale = "row", # Standardize rows for better visualization
+         clustering_distance_rows = "euclidean", 
+         clustering_distance_cols = "euclidean",
+         clustering_method = "complete", 
+         main = "Heatmap of Transport Genes",
+         show_rownames = TRUE, # Show gene names
+         show_colnames = TRUE,
+         fontsize_row = 8) # Show sample names
+
+```
+
+```{r}
+# Assuming 'transport_heatmap' is your data
+# Calculate the row-wise means for each group of replicates
+
+# Averages for pro_B12_17 group
+transport_heatmap$pro_B12_17_avg <- rowMeans(transport_heatmap[, c("pro_B12_17_1", "pro_B12_17_2", "pro_B12_17_3")], na.rm = TRUE)
+
+# Averages for pro_B12_21 group
+transport_heatmap$pro_B12_21_avg <- rowMeans(transport_heatmap[, c("pro_B12_21_1", "pro_B12_21_2", "pro_B12_21_3")], na.rm = TRUE)
+
+# Averages for nonpro_B12 group
+transport_heatmap$nonpro_B12_avg <- rowMeans(transport_heatmap[, c("nonpro_B12_1", "nonpro_B12_2", "nonpro_B12_3")], na.rm = TRUE)
+
+# Averages for pro_wt_1 group
+transport_heatmap$pro_wt_1_avg <- rowMeans(transport_heatmap[, c("pro_wt_1_1", "pro_wt_1_2", "pro_wt_1_3")], na.rm = TRUE)
+
+# Averages for pro_wt_3 group
+transport_heatmap$pro_wt_3_avg <- rowMeans(transport_heatmap[, c("pro_wt_3_1", "pro_wt_3_2", "pro_wt_3_3")], na.rm = TRUE)
+
+# Averages for nonpro_wt group
+transport_heatmap$nonpro_wt_avg <- rowMeans(transport_heatmap[, c("nonpro_wt_1", "nonpro_wt_2", "nonpro_wt_3")], na.rm = TRUE)
+
+```
+
+```{r}
+# Create a new data frame for the heatmap with averaged columns
+heatmap_data_avg <- transport_heatmap[, c("name", "pro_B12_17_avg", "pro_B12_21_avg", "nonpro_B12_avg", 
+                                          "pro_wt_1_avg", "pro_wt_3_avg", "nonpro_wt_avg")]
+
+# Set row names to the gene names for the heatmap
+rownames(heatmap_data_avg) <- heatmap_data_avg$name
+
+# Remove the 'name' column as we now have row names set
+heatmap_data_avg <- heatmap_data_avg[, -1]
+
+```
+
+```{r}
+# Load necessary library
+library(pheatmap)
+
+# Generate heatmap with the averaged data
+pheatmap(heatmap_data_avg, 
+         scale = "row",  # Scale by row (genes) for better visualization
+         clustering_distance_rows = "euclidean",  # Cluster rows by Euclidean distance
+         clustering_distance_cols = "euclidean",  # Cluster columns by Euclidean distance
+         clustering_method = "complete",  # Complete-linkage clustering
+         main = "Heatmap of Averaged Transport Genes",
+         show_rownames = TRUE,  # Display gene names
+         show_colnames = TRUE,  # Display column names
+         fontsize_row = 6,  # Adjust row font size to fit gene labels
+         fontsize_col = 10)  # Adjust column font size
+
+```
+
+```{r}
+# List of genes you're interested in
+genes_of_interest <- c("Carmil1", "Magoh", "Nup160", "Nup35", "Plk1", "Plrg1", "Zw10")
+
+# Subset the data frame for these specific genes
+heatmap_data_filtered_avg <- transport_heatmap[transport_heatmap$name %in% genes_of_interest, ]
+
+# Set row names to the gene names
+rownames(heatmap_data_filtered_avg) <- heatmap_data_filtered_avg$name
+
+# Remove the 'name' column as it's now used as row names
+heatmap_data_filtered_avg <- heatmap_data_filtered_avg[, -1]
+
+# Load necessary library
+library(pheatmap)
+
+# Generate heatmap with the filtered data
+pheatmap(heatmap_data_filtered_avg, 
+         scale = "row",  # Scale by row (genes)
+         clustering_distance_rows = "euclidean",  # Cluster rows by Euclidean distance
+         clustering_distance_cols = "euclidean",  # Cluster columns by Euclidean distance
+         clustering_method = "complete",  # Complete-linkage clustering
+         main = "Heatmap of Significant Transport Proteins in BAR and RNAseq",
+         show_rownames = TRUE,  # Display gene names
+         show_colnames = TRUE,  # Display column names
+         fontsize_row = 8,  # Adjust row font size for readability
+         fontsize_col = 10)  # Adjust column font size
+
+```
+
+```{r}
+# List of genes you're interested in
+genes_of_interest <- c("Carmil1", "Magoh", "Nup160", "Nup35", "Plk1", "Plrg1", "Zw10")
+
+# Subset the data frame for these specific genes
+heatmap_data_filtered_avg <- transport_heatmap[transport_heatmap$name %in% genes_of_interest, ]
+
+# Set row names to the gene names
+rownames(heatmap_data_filtered_avg) <- heatmap_data_filtered_avg$name
+
+# Remove the 'name' column as it's now used as row names
+heatmap_data_filtered_avg <- heatmap_data_filtered_avg[, -1]
+
+# Check the filtered data
+print(heatmap_data_filtered_avg)
+
+```
+
+```{r}
+# Create a new data frame for the heatmap with averaged columns
+heatmap_data_avg <- heatmap_data_filtered_avg[, c("pro_B12_17_avg", "pro_B12_21_avg", "nonpro_B12_avg", 
+                                                  "pro_wt_1_avg", "pro_wt_3_avg", "nonpro_wt_avg")]
+
+# Set row names to the gene names for the heatmap
+rownames(heatmap_data_avg) <- rownames(heatmap_data_filtered_avg)
+
+# Check the averaged data for the genes of interest
+print(heatmap_data_avg)
+
+```
+
+```{r}
+# Load necessary library
+library(pheatmap)
+
+# Generate heatmap with the averaged data for the genes of interest
+pheatmap(heatmap_data_avg, 
+         scale = "row",  # Scale by row (genes)
+         clustering_distance_rows = "euclidean",  # Cluster rows by Euclidean distance
+         clustering_distance_cols = "euclidean",  # Cluster columns by Euclidean distance
+         clustering_method = "complete",  # Complete-linkage clustering
+         main = "Heatmap of Significant Transport Proteins in BAR and RNAseq",
+         show_rownames = TRUE,  # Display gene names
+         show_colnames = TRUE,  # Display column names
+         fontsize_row = 8,  # Adjust row font size for readability
+         fontsize_col = 10)  # Adjust column font size
+
+```
+
+#looking at the 30 PPIs/genes overlap with MS and RNAseq in transport and folding (padj \<0.05 and FC \>0)
+
+```{r}
+trans_and_fold <-read.csv("MS_RNA_sigFC_30genes_foldingtransportlist.csv")
+View(trans_and_fold)
+colnames(trans_and_fold)
+```
+
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(pheatmap)
+
+# Load the data
+trans_and_fold <- read.csv("MS_RNA_sigFC_30genes_foldingtransportlist.csv")
+
+# Calculate the average for each group of replicates using base R
+trans_and_fold$avg_pro_B12_17 <- rowMeans(trans_and_fold[, c("pro_B12_17_1", "pro_B12_17_2", "pro_B12_17_3")], na.rm = TRUE)
+trans_and_fold$avg_pro_B12_21 <- rowMeans(trans_and_fold[, c("pro_B12_21_1", "pro_B12_21_2", "pro_B12_21_3")], na.rm = TRUE)
+trans_and_fold$avg_nonpro_B12 <- rowMeans(trans_and_fold[, c("nonpro_B12_1", "nonpro_B12_2")], na.rm = TRUE)
+trans_and_fold$avg_pro_wt_1 <- rowMeans(trans_and_fold[, c("pro_wt_1_1", "pro_wt_1_2", "pro_wt_1_3")], na.rm = TRUE)
+trans_and_fold$avg_pro_wt_3 <- rowMeans(trans_and_fold[, c("pro_wt_3_1", "pro_wt_3_2", "pro_wt_3_3")], na.rm = TRUE)
+trans_and_fold$avg_nonpro_wt <- rowMeans(trans_and_fold[, c("nonpro_wt_1", "nonpro_wt_2")], na.rm = TRUE)
+
+# Select only the averaged columns and the gene names
+heatmap_data <- trans_and_fold[, c("name_converted", "avg_pro_B12_17", "avg_pro_B12_21", "avg_nonpro_B12", 
+                                   "avg_pro_wt_1", "avg_pro_wt_3", "avg_nonpro_wt")]
+
+# Set 'name_converted' as row names for the heatmap
+rownames(heatmap_data) <- heatmap_data$name_converted
+
+# Remove the 'name_converted' column as it is now set as rownames
+heatmap_data <- heatmap_data[, -1]
+
+# Convert data to a matrix format for pheatmap
+heatmap_matrix <- as.matrix(heatmap_data)
+
+# Generate the heatmap
+pheatmap(
+  heatmap_matrix,
+  scale = "row",  # Normalizes data row-wise
+  clustering_distance_rows = "euclidean",  # Row clustering method
+  clustering_distance_cols = "euclidean",  # Column clustering method
+  clustering_method = "complete",  # Clustering algorithm
+  color = colorRampPalette(c("blue", "white", "red"))(50),  # Color gradient
+  main = "Heatmap of Significant PPIs for transport and protein folding",
+  fontsize_row = 8,
+  fontsize_col = 8
+)
+
+
+```
+
+```{r}
+MS_heatmap_transport<- read.csv("MS_transport_heatmap_02132025.csv")
+colnames(MS_heatmap_transport)
+```
+
+```{r}
+# Load necessary library
+library(pheatmap)
+
+# Select relevant columns
+heatmap_data <- MS_heatmap_transport[, c("name_converted", 
+                         "pro_CL1_17_1", "pro_CL1_17_2", "pro_CL1_17_3",
+                         "pro_CL1_21_1", "pro_CL1_21_2", "pro_CL1_21_3",
+                         "nonpro_CL1_1", "nonpro_CL1_2", "nonpro_CL1_3",
+                         "pro_WT_1_1", "pro_WT_1_2", "pro_WT_1_3",
+                         "pro_WT_3_1", "pro_WT_3_2", "pro_WT_3_3",
+                         "nonpro_WT_1", "nonpro_WT_2", "nonpro_WT_3")]
+
+# Set 'name_converted' as row names
+rownames(heatmap_data) <- heatmap_data$name_converted
+
+# Remove 'name_converted' column
+heatmap_data <- heatmap_data[, -1]
+
+# Convert to matrix
+heatmap_matrix <- as.matrix(heatmap_data)
+
+# Generate heatmap
+pheatmap(
+  heatmap_matrix,
+  scale = "row",  # Normalizes data row-wise
+  clustering_distance_rows = "euclidean",
+  clustering_distance_cols = "euclidean",
+  clustering_method = "complete",
+  color = colorRampPalette(c("blue", "white", "red"))(50),
+  main = "Heatmap of LFQ Intensities (name_converted)",
+  fontsize_row = 8,
+  fontsize_col = 8
+)
+
+
+```
+
+#average the replicates together: heatmap of the transport proteins
+
+```{r}
+# Load necessary library
+library(pheatmap)
+
+# Select relevant columns
+heatmap_data <- MS_heatmap_transport[, c("name_converted", 
+                         "pro_CL1_17_1", "pro_CL1_17_2", "pro_CL1_17_3",
+                         "pro_CL1_21_1", "pro_CL1_21_2", "pro_CL1_21_3",
+                         "nonpro_CL1_1", "nonpro_CL1_2", "nonpro_CL1_3",
+                         "pro_WT_1_1", "pro_WT_1_2", "pro_WT_1_3",
+                         "pro_WT_3_1", "pro_WT_3_2", "pro_WT_3_3",
+                         "nonpro_WT_1", "nonpro_WT_2", "nonpro_WT_3")]
+
+# Average replicates
+heatmap_data$avg_pro_CL1_17 <- rowMeans(heatmap_data[, c("pro_CL1_17_1", "pro_CL1_17_2", "pro_CL1_17_3")], na.rm = TRUE)
+heatmap_data$avg_pro_CL1_21 <- rowMeans(heatmap_data[, c("pro_CL1_21_1", "pro_CL1_21_2", "pro_CL1_21_3")], na.rm = TRUE)
+heatmap_data$avg_nonpro_CL1 <- rowMeans(heatmap_data[, c("nonpro_CL1_1", "nonpro_CL1_2", "nonpro_CL1_3")], na.rm = TRUE)
+heatmap_data$avg_pro_WT_1 <- rowMeans(heatmap_data[, c("pro_WT_1_1", "pro_WT_1_2", "pro_WT_1_3")], na.rm = TRUE)
+heatmap_data$avg_pro_WT_3 <- rowMeans(heatmap_data[, c("pro_WT_3_1", "pro_WT_3_2", "pro_WT_3_3")], na.rm = TRUE)
+heatmap_data$avg_nonpro_WT <- rowMeans(heatmap_data[, c("nonpro_WT_1", "nonpro_WT_2", "nonpro_WT_3")], na.rm = TRUE)
+
+# Keep only averaged columns
+heatmap_avg_data <- heatmap_data[, c("name_converted", "avg_pro_CL1_17", "avg_pro_CL1_21", 
+                                     "avg_nonpro_CL1", "avg_pro_WT_1", "avg_pro_WT_3", "avg_nonpro_WT")]
+
+# Set 'name_converted' as row names
+rownames(heatmap_avg_data) <- heatmap_avg_data$name_converted
+
+# Remove 'name_converted' column
+heatmap_avg_data <- heatmap_avg_data[, -1]
+
+# Convert to matrix
+heatmap_matrix <- as.matrix(heatmap_avg_data)
+
+# Generate heatmap
+pheatmap(
+  heatmap_matrix,
+  scale = "row",  # Normalizes data row-wise
+  clustering_distance_rows = "euclidean",
+  clustering_distance_cols = "euclidean",
+  clustering_method = "complete",
+  color = colorRampPalette(c("blue", "white", "red"))(50),
+  main = "Heatmap of of Significant PPIs for Transport and Protein Folding",
+  fontsize_row = 8,
+  fontsize_col = 8,
+  legend_cex = 10  # Increase legend size
+)
+
+```
+
+## selected enrichment PPIs
+
+```{r}
+selected_PPI <- read.csv("selected_enrichment_PPI.csv")
+colnames(selected_PPI)
+```
+
+```{r}
+# Load necessary libraries
+library(ggplot2)
+
+
+# Basic dot plot with gene count on the x-axis
+ggplot(selected_PPI, aes(x = observed.gene.count, 
+                         y = reorder(term.description, observed.gene.count))) +
+  geom_point(aes(size = observed.gene.count, color = false.discovery.rate)) +
+  scale_color_gradient(low = "blue", high = "red") + # Color by FDR
+  labs(title = "Pathway Enrichment of PPI in all Producers",
+       x = "Observed Gene Count",
+       y = "Term Description",
+       color = "False Discovery Rate",
+       size = "Observed Gene Count") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 8)) # Adjust y-axis label size for readability
+
+
+```
+
+# Common genes between PPIs of wtpro and B12pro and also what is the difference
+
+```{r}
+wtpro_b12pro_ppi <- read.csv("wtpro_andB12pro_commongenes_MS.csv")
+colnames(wtpro_b12pro_ppi)
+```
+
+```{r}
+
+# Find common names (intersection)
+common_pro_ppi <- intersect(wtpro_b12pro_ppi$wtpro_sig_genes_MS, wtpro_b12pro_ppi$B12pro_sig_genes_MS)
+
+# Find names only in wtpro (not in b12pro)
+unique_wtpro_ppi <- setdiff(wtpro_b12pro_ppi$wtpro_sig_genes_MS, wtpro_b12pro_ppi$B12pro_sig_genes_MS)
+
+# Find names only in b12pro (not in wtpro)
+unique_b12pro_ppi <- setdiff(wtpro_b12pro_ppi$B12pro_sig_genes_MS, wtpro_b12pro_ppi$wtpro_sig_genes_MS)
+
+# Optionally, you can view the results as data frames
+common_names_df <- data.frame(name = common_pro_ppi)
+unique_wtpro_df <- data.frame(name = unique_wtpro_ppi)
+unique_b12pro_df <- data.frame(name = unique_b12pro_ppi)
+
+# View the data (e.g., print them or write them to CSV)
+print(common_names_df)  # This shows the common names in data frame format
+print(unique_wtpro_df)  # This shows unique names for wtpro in data frame format
+print(unique_b12pro_df) # This shows unique names for b12pro in data frame format
+
+# Optionally, export the results as CSV files
+write.csv(common_names_df, "common_pro_ppi_02122025.csv", row.names = FALSE)
+write.csv(unique_wtpro_df, "unique_wtpro_ppi_02122025.csv", row.names = FALSE)
+write.csv(unique_b12pro_df, "unique_b12pro_ppi_02122025.csv", row.names = FALSE)
+
+
+
+```
+
+```{r}
+dim(common_names_df)
+dim(unique_wtpro_df)
+dim(unique_b12pro_df)
+```
