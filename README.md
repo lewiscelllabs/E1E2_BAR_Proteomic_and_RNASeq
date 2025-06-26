@@ -1,4 +1,4 @@
-# E1E2_BAR_Proteomic_Analysis
+# E1E2 BAR Proteomic Analysis
 This repository contains the data and code to accompany "Enhanced Production of HCV E1E2 Subunit Vaccine Candidates via Protein-Portein Interaction Identification in Glycoengineered CHO cells. 
 
 # This Repository includes:
