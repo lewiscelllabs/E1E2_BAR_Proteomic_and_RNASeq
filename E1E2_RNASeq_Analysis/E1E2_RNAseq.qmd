@@ -38,11 +38,7 @@ View(gene_counts)
 
 ```
 
-
-
-#check whether the sE1E2 is in the samples
-
-Check the variance with PCA of the filtered data
+# Check the variance with PCA of the filtered data
 
 ```{r}
 gene_counts <- as.data.frame(gene_counts)
