@@ -1,5 +1,5 @@
 # E1E2 BAR Proteomic and RNA-Seq Analysis
-This repository contains the data and code to accompany "Enhanced Production of HCV E1E2 Subunit Vaccine Candidates via Protein-Protein Interaction Identification in Glycoengineered CHO cells (https://www.biorxiv.org/content/10.1101/2025.06.12.659199v1.abstract) by Wu et al.
+This repository contains the data and code to accompany "Enhanced Production of HCV E1E2 Subunit Vaccine Candidates via Protein-Protein Interaction Identification in Glycoengineered CHO cells (https://www.biorxiv.org/content/10.1101/2025.05.20.655202v1.abstract) by Wu et al.
 
 # This Repository includes:
 1) Proteomic analysis ofthe E1E2 BAR proteomic dataset in R using the DEP package.
