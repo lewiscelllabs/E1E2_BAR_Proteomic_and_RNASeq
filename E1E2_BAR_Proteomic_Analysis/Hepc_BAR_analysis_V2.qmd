@@ -121,7 +121,7 @@ data_norm <- normalize_vsn(data_filt)
 # Visualize normalization by boxplots for all samples before and after normalization
 plot_normalization(data_filt, data_norm)
 ```
-
+#export files to add column to determine: proteins detected in the producer cell line or not and vice versa with nonproducer cell lines. Do it for each cell line. 
 ```{r}
 # Generate a long data.frame
 post_norm <- get_df_wide(data_norm)
@@ -252,7 +252,8 @@ pheatmap(
 )
 ```
 
-#Performed welch's t-test in excel each producer against its parental cell line. Import the file here to R to perform padj using Benjamini-Hochberg.
+#Performed welch's t-test in excel each producer against its parental cell line. Import the file to R to perform padj using Benjamini-Hochberg.
+#File was added with columns status in pro_B12_17, pro_b12_21, nonprob12, pro_wt_1, pro_wt_3, nonpro_wt.
 
 ```{r}
 data_ttest <- read.csv("hepc_post_impute_ttest.csv")
@@ -315,7 +316,7 @@ head(data_ttest)
 #write.csv(data_ttest, "hepc_post_impute_padj_wtprovsb12pro.csv", row.names = FALSE)
 ```
 
-#Imputed file was exported as excel file, where filtering was done one the sample with filtering criteria: proteins detected in the producer cell line but not in the parental cell line, and proteins showing significant differences between the producer and parental cell lines (fold change \> 0 and adjusted p-value \< 0.05).
+#import the impute file
 
 #Read the filtered data done in excel in the csv file. 
 ```{r}
