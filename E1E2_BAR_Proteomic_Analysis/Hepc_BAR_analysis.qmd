@@ -330,7 +330,7 @@ colnames(data_padj)
 
 #perform volcano plots of the producers vs parental cell line using padjusted (< 0.05) and log2FC (> 0). 
 
-#CL1#17 vs parental
+# CL1_17 vs parental
 
 ```{r}
 # Load the necessary libraries
@@ -386,7 +386,7 @@ print(volcano_plot_PPIs)
 ```
 
 
-#CL1_21 vs parental
+# CL1_21 vs parental
 
 ```{r}
 # Load the necessary libraries
@@ -500,7 +500,7 @@ print(volcano_plot_PPIs_wt1)
 
 
 
-#ctrl_3 vs parental cell line
+# Ctrl_3 vs parental cell line
 
 ```{r}
 # Load the necessary libraries
@@ -584,4 +584,5 @@ ggplot(selected_PPI, aes(x = observed.gene.count,
 
 
 ```
+
 
