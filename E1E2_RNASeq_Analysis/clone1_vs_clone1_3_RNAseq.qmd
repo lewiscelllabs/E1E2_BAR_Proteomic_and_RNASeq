@@ -107,11 +107,11 @@ volcano_wtvsclone1_3$expression <- ifelse(volcano_wtvsclone1_3$padj < significan
                                  ifelse(volcano_wtvsclone1_3$padj < significance_threshold & volcano_wtvsclone1_3$log2FoldChange < -fold_change_threshold, "Downregulated", 
                                         "Not Significant"))
 
-# Select the top 10 genes based on absolute fold change and adjusted p-value
+# Select the top 8 genes based on absolute fold change and adjusted p-value
 top_genes <- volcano_wtvsclone1_3 %>%
   filter(padj < significance_threshold) %>%  # Keep only significant genes
   arrange(desc(abs(log2FoldChange)), padj) %>%  # Sort by highest fold change, then lowest adjusted p-value
-  slice_head(n = 8)  # Select top 10 genes (adjust as needed)
+  slice_head(n = 8)  # Select top 8 genes (adjust as needed)
 
 # Create the volcano plot
 ggplot(volcano_wtvsclone1_3, aes(x = log2FoldChange, y = -log10(padj), color = expression)) +
@@ -131,3 +131,4 @@ ggplot(volcano_wtvsclone1_3, aes(x = log2FoldChange, y = -log10(padj), color = e
 # Optionally save the plot
 # ggsave("volcano_plot_wt3_vs_wt.png", width = 8, height = 6)
 ```
+
