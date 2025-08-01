@@ -121,7 +121,7 @@ data_norm <- normalize_vsn(data_filt)
 # Visualize normalization by boxplots for all samples before and after normalization
 plot_normalization(data_filt, data_norm)
 ```
-#export files to add column to determine: proteins detected in the producer cell line or not and vice versa with nonproducer cell lines. Do it for each cell line. 
+# Export files to add column to determine: proteins detected in the producer cell line or not and vice versa with nonproducer cell lines. Do it for each cell line. 
 ```{r}
 # Generate a long data.frame
 post_norm <- get_df_wide(data_norm)
@@ -584,3 +584,4 @@ ggplot(selected_PPI, aes(x = observed.gene.count,
 
 
 ```
+
